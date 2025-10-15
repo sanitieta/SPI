@@ -2,6 +2,8 @@
 // Created by xuhao on 2025/10/12.
 //
 #include "bmi088.h"
+
+#include "IMU.h"
 #include <cmath>
 
 void BMI088_ACCEL_NS_L() {
@@ -97,7 +99,8 @@ void bmi088_gyro_read_data(float* range, float* wx, float* wy, float* wz) {
         default:
             *range = 0.0f;
     }
-    // 2. 读取acc0x12寄存器中的6位gyro数据
+    *range = (*range) * PI / 180.0f;
+    // 2. 读取acc0x12寄存器中的6位gyro数据 以弧度输出
     bmi088_gyro_read_reg(0x02, rx_gyro_data, 6);
     *wx = static_cast<int16_t>(rx_gyro_data[1] << 8 | rx_gyro_data[0]) * (*range) / 32767.0f;
     *wy = static_cast<int16_t>(rx_gyro_data[3] << 8 | rx_gyro_data[2]) * (*range) / 32767.0f;
