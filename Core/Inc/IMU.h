@@ -17,7 +17,7 @@ public:
 
 private:
     typedef struct EulerAngle {
-        float yaw = 0, roll = 0, pitch = 0;
+        float roll = 0, pitch = 0, yaw = 0;
     } EulerAngle;
 
     typedef struct Gyro {

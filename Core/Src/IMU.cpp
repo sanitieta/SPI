@@ -33,6 +33,7 @@ void IMU::get_gyro_xyz(float* gyro_x, float* gyro_y, float* gyro_z) {
     *gyro_y = gyro_.pitch_rate_;
     *gyro_z = gyro_.yaw_rate_;
 }
+
 void IMU::get_euler_angle(float* roll, float* pitch, float* yaw) {
     *roll = euler_.roll;
     *pitch = euler_.pitch;
@@ -72,7 +73,7 @@ void IMU::Accel::acc_calculate() {
 
 void IMU::Gyro::gyro_calculate(const EulerAngle& euler) {
     // 1. 设置/读取acc0x0F寄存器中的量程range参数，并换算为量程系数
-    static uint8_t raw_range;
+    uint8_t raw_range;
     static float transition_matrix[3][3] = { 0 };
     bmi088_gyro_read_reg(0x0F, &raw_range, 1);
     switch (raw_range) {
@@ -102,7 +103,7 @@ void IMU::Gyro::gyro_calculate(const EulerAngle& euler) {
     last_yaw_rate_ = yaw_rate_;
 
     float roll_rad = euler.roll * PI / 180.0f;
-    float pitch_rad = euler.pitch * PI / 180.0f;
+    float pitch_rad = euler.pitch * PI / 180.0f; // 传入的pitch已经经过保护:tan(pitch)不会无穷大
     transition_matrix[0][0] = 1;
     transition_matrix[0][1] = sinf(roll_rad) * tanf(pitch_rad);
     transition_matrix[0][2] = cosf(roll_rad) * tanf(pitch_rad);
@@ -124,12 +125,18 @@ void IMU::Gyro::gyro_calculate(const EulerAngle& euler) {
 void IMU::complement_calculate(float dt, float comp_alpha_) {
     float acc_pitch = atan2f(-accel_.x, sqrt(accel_.y * accel_.y + accel_.z * accel_.z)) * 180.0f / PI;
     float acc_roll = atan2f(accel_.y, accel_.z) * 180.0f / PI;
-    float gyro_pitch = euler_.pitch + (gyro_.last_pitch_rate_ + gyro_.pitch_rate_) / 2.0f * dt; // 中值积分
+    // 中值积分
+    float gyro_pitch = euler_.pitch + (gyro_.last_pitch_rate_ + gyro_.pitch_rate_) / 2.0f * dt;
     float gyro_roll = euler_.roll + (gyro_.last_roll_rate_ + gyro_.roll_rate_) / 2.0f * dt;
 
     euler_.yaw += (gyro_.last_yaw_rate_ + gyro_.yaw_rate_) / 2.0f * dt; // yaw角不使用互补滤波
     euler_.pitch = (1.0f - comp_alpha_) * gyro_pitch + comp_alpha_ * acc_pitch;
     euler_.roll = (1.0f - comp_alpha_) * gyro_roll + comp_alpha_ * acc_roll;
+
+    // 保护pitch角，防止出现tan(pitch)无穷大的情况
+    if (fabsf(euler_.pitch) < 1e-2f) {
+        euler_.pitch = (euler_.pitch > 0 ? (90.0f - 1e-1f) : (-90.0f + 1e-3f));
+    }
 }
 
 void IMU::kalman_calculate(float dt) {}
