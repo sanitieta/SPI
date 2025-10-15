@@ -34,10 +34,15 @@ enable_language(C ASM)
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME}
         Core/Src/callback.cpp
-        Core/Src/bmi088.c
         Core/Src/IMU.cpp
         Core/Inc/IMU.h
-        Core/Src/bmi088.cpp)
+        Core/Src/bmi088.cpp
+        Core/Src/IST8310.cpp
+        Core/Inc/IST8310.h
+        Core/Inc/IST8310reg.h
+        Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c.c
+        Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c_ex.c
+        Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_i2c.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)

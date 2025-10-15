@@ -24,23 +24,29 @@ private:
         float roll_rate_ = 0, pitch_rate_ = 0, yaw_rate_ = 0;
         float last_roll_rate_ = 0, last_pitch_rate_ = 0, last_yaw_rate_ = 0;
         float gyro_range_ = 0;
-        uint8_t rx_gyro_data_[6]{ 0 };
 
         void gyro_calculate(const EulerAngle& euler);
     } Gyro;
 
     typedef struct Accel {
         float x = 0, y = 0, z = 0;
+        float acc_pitch_ = 0, acc_roll_ = 0;
         float acc_range_ = 0;
-        uint8_t rx_acc_data_[6]{ 0 };
 
         void acc_calculate();
     } Accel;
+
+    typedef struct Compass {
+        float x = 0, y = 0, z = 0; // 单位 uT
+
+        void compass_calculate();
+    } Compass;
 
     void complement_calculate(float dt, float comp_alpha_ = 0.02);
     void kalman_calculate(float dt);
     Accel accel_;
     Gyro gyro_;
+    Compass compass_;
     EulerAngle euler_;
 };
 
