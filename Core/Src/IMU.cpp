@@ -25,7 +25,10 @@ void IMU::update(float dt) {
     gyro_.gyro_calculate(this->euler_);
     if (i % 5 == 0) {
         compass_.compass_calculate(this->euler_); // 磁力计频率低一些 200Hz
+        compass_.if_updated_ = true;
         i = 0;
+    } else {
+        compass_.if_updated_ = false;
     }
     i++;
     complement_calculate(dt);
@@ -119,15 +122,20 @@ void IMU::imu_init() {
 }
 
 // ---------------- 互补滤波 ----------------
-void IMU::complement_calculate(float dt, float comp_alpha_) {
+void IMU::complement_calculate(float dt, float comp_acc_alpha_, float comp_compass_alpha_) {
     // 中值积分
     float gyro_pitch = euler_.pitch_ + (gyro_.last_pitch_rate_ + gyro_.pitch_rate_) / 2.0f * dt;
     float gyro_roll = euler_.roll_ + (gyro_.last_roll_rate_ + gyro_.roll_rate_) / 2.0f * dt;
     float gyro_yaw = euler_.yaw_ + (gyro_.last_yaw_rate_ + gyro_.yaw_rate_) / 2.0f * dt;
 
-    euler_.yaw_ = (1.0f - comp_alpha_) * gyro_yaw + comp_alpha_ * compass_.compass_yaw_;
-    euler_.pitch_ = (1.0f - comp_alpha_) * gyro_pitch + comp_alpha_ * accel_.acc_pitch_;
-    euler_.roll_ = (1.0f - comp_alpha_) * gyro_roll + comp_alpha_ * accel_.acc_roll_;
+    if (compass_.if_updated_ == true) {
+        // 仅在磁力计更新时使用互补滤波
+        euler_.yaw_ = (1.0f - comp_compass_alpha_) * gyro_yaw + comp_compass_alpha_ * compass_.compass_yaw_;
+    } else {
+        euler_.yaw_ = gyro_yaw;
+    }
+    euler_.pitch_ = (1.0f - comp_acc_alpha_) * gyro_pitch + comp_acc_alpha_ * accel_.acc_pitch_;
+    euler_.roll_ = (1.0f - comp_acc_alpha_) * gyro_roll + comp_acc_alpha_ * accel_.acc_roll_;
 
     // 限制 pitch，防止 tan(pitch) → ∞
     if (fabsf(cosf(euler_.pitch_)) < 1e-3f) {
