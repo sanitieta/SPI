@@ -7,7 +7,6 @@
 #include "stm32f4xx_hal.h"
 
 
-
 class IMU {
 public:
     void update(float dt);
@@ -36,11 +35,12 @@ private:
     typedef struct Compass {
         float mx_ = 0, my_ = 0, mz_ = 0; // 单位 uT
         float compass_yaw_ = 0;
+        bool if_updated_ = false; // 磁力计更新标志位 200Hz
         void compass_calculate(const EulerAngle& euler);
     } Compass;
 
     void imu_init();
-    void complement_calculate(float dt, float comp_alpha_ = 0.02);
+    void complement_calculate(float dt, float comp_acc_alpha_ = 0.02, float comp_compass_alpha_ = 0.01);
     void kalman_calculate(float dt);
     Accel accel_;
     Gyro gyro_;
