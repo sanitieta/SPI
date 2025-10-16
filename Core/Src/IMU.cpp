@@ -22,16 +22,15 @@ void IMU::update(float dt) {
         if_first = false;
     }
     accel_.acc_calculate();
-    gyro_.gyro_calculate(this->euler_);
+    gyro_.gyro_calculate(this->euler_, dt);
     if (i % 5 == 0) {
         compass_.compass_calculate(this->euler_); // 磁力计频率低一些 200Hz
-
         i = 0;
     } else {
-        compass_.if_updated_ = false;
+        compass_.if_updated_ = false; // 手动清除标志位1
     }
     i++;
-    complement_calculate(dt);
+    kalman_calculate();
 }
 
 // 输出接口依旧用角度，方便上层使用
@@ -50,7 +49,7 @@ void IMU::Accel::acc_calculate() {
 }
 
 // ---------------- 陀螺仪 ----------------
-void IMU::Gyro::gyro_calculate(const EulerAngle& euler) {
+void IMU::Gyro::gyro_calculate(const EulerAngle& euler, float dt) {
     // 0. 更新last值
     last_roll_rate_ = roll_rate_;
     last_pitch_rate_ = pitch_rate_;
@@ -77,9 +76,14 @@ void IMU::Gyro::gyro_calculate(const EulerAngle& euler) {
     roll_rate_ = R[0][0] * imu_wx + R[0][1] * imu_wy + R[0][2] * imu_wz;
     pitch_rate_ = R[1][0] * imu_wx + R[1][1] * imu_wy + R[1][2] * imu_wz;
     yaw_rate_ = R[2][0] * imu_wx + R[2][1] * imu_wy + R[2][2] * imu_wz;
+
+    gyro_pitch_ = euler.pitch_ + (last_pitch_rate_ + pitch_rate_) / 2.0f * dt;
+    gyro_roll_ = euler.roll_ + (last_roll_rate_ + roll_rate_) / 2.0f * dt;
+    gyro_yaw_ = euler.yaw_ + (last_yaw_rate_ + yaw_rate_) / 2.0f * dt;
 }
 
-// ---------------- 磁力计 ----------------
+
+// 磁力计
 void IMU::Compass::compass_calculate(const EulerAngle& euler) {
     IST8310ReadMagData(&mx_, &my_, &mz_);
 
@@ -101,14 +105,14 @@ void IMU::Compass::compass_calculate(const EulerAngle& euler) {
     if_updated_ = true;
 }
 
-// ---------------- 初始化 ----------------
+// 初始化
 void IMU::imu_init() {
     // 空读几次丢掉前几次不稳定的数据
     for (size_t i = 0; i < 10; i++) {
         IST8310ReadMagData(nullptr, nullptr, nullptr);
         bmi088_gyro_read_data(nullptr, nullptr, nullptr, nullptr);
         bmi088_accel_read_data(nullptr, nullptr, nullptr, nullptr);
-        for (volatile int j = 0; j < 5000; j++);
+        for (volatile int j = 0; j < 5000; j++) {}
     }
 
     // 初始姿态
@@ -119,24 +123,19 @@ void IMU::imu_init() {
     compass_.compass_calculate(euler_);
     euler_.yaw_ = compass_.compass_yaw_;
 
-    gyro_.gyro_calculate(this->euler_);
+    gyro_.gyro_calculate(this->euler_, 0.001f);
 }
 
-// ---------------- 互补滤波 ----------------
-void IMU::complement_calculate(float dt, float comp_acc_alpha_, float comp_compass_alpha_) {
-    // 中值积分
-    float gyro_pitch = euler_.pitch_ + (gyro_.last_pitch_rate_ + gyro_.pitch_rate_) / 2.0f * dt;
-    float gyro_roll = euler_.roll_ + (gyro_.last_roll_rate_ + gyro_.roll_rate_) / 2.0f * dt;
-    float gyro_yaw = euler_.yaw_ + (gyro_.last_yaw_rate_ + gyro_.yaw_rate_) / 2.0f * dt;
-
+// 互补滤波
+void IMU::complement_calculate(float comp_acc_alpha_, float comp_compass_alpha_) {
     if (compass_.if_updated_ == true) {
         // 仅在磁力计更新时使用互补滤波
-        euler_.yaw_ = (1.0f - comp_compass_alpha_) * gyro_yaw + comp_compass_alpha_ * compass_.compass_yaw_;
+        euler_.yaw_ = (1.0f - comp_compass_alpha_) * gyro_.gyro_yaw_ + comp_compass_alpha_ * compass_.compass_yaw_;
     } else {
-        euler_.yaw_ = gyro_yaw;
+        euler_.yaw_ = gyro_.gyro_yaw_;
     }
-    euler_.pitch_ = (1.0f - comp_acc_alpha_) * gyro_pitch + comp_acc_alpha_ * accel_.acc_pitch_;
-    euler_.roll_ = (1.0f - comp_acc_alpha_) * gyro_roll + comp_acc_alpha_ * accel_.acc_roll_;
+    euler_.pitch_ = (1.0f - comp_acc_alpha_) * gyro_.gyro_pitch_ + comp_acc_alpha_ * accel_.acc_pitch_;
+    euler_.roll_ = (1.0f - comp_acc_alpha_) * gyro_.gyro_roll_ + comp_acc_alpha_ * accel_.acc_roll_;
 
     // 限制 pitch，防止 tan(pitch) → ∞
     if (fabsf(cosf(euler_.pitch_)) < 1e-3f) {
@@ -148,4 +147,33 @@ void IMU::complement_calculate(float dt, float comp_acc_alpha_, float comp_compa
     euler_.yaw_degree_ = euler_.yaw_ * RAD2DEG;
 }
 
-void IMU::kalman_calculate(float dt) {}
+void IMU::kalman_calculate() {
+    static float P_roll = 1e-3f, P_pitch = 1e-3f, P_yaw = 1e-3f; // 状态协方差
+    const float Q_roll = 1e-5f, Q_pitch = 1e-5f, Q_yaw = 1e-5f; // 过程噪声
+    const float R_roll = 0.01f, R_pitch = 0.01f, R_yaw = 0.05f; // 观测噪声
+    // 1. 预测
+    P_roll += Q_roll;
+    P_pitch += Q_pitch;
+    P_yaw += Q_yaw;
+    // 2. 更新
+    // roll
+    float K_roll = P_roll / (P_roll + R_roll);
+    euler_.roll_ += K_roll * (accel_.acc_roll_ - gyro_.gyro_roll_);
+    P_roll *= (1 - K_roll);
+    // pitch
+    float K_pitch = P_pitch / (P_pitch + R_pitch);
+    euler_.pitch_ += K_pitch * (accel_.acc_pitch_ - gyro_.gyro_pitch_);
+    P_pitch *= (1 - K_pitch);
+    // yaw (磁力计更新时才使用卡尔曼滤波更新)
+    if (compass_.if_updated_ == true) {
+        float K_yaw = P_yaw / (P_yaw + R_yaw);
+        euler_.yaw_ += K_yaw * (compass_.compass_yaw_ - gyro_.gyro_yaw_);
+        P_yaw *= (1 - K_yaw);
+    } else {
+        euler_.yaw_ = gyro_.gyro_yaw_;
+    }
+
+    euler_.roll_degree_ = euler_.roll_ * RAD2DEG;
+    euler_.pitch_degree_ = euler_.pitch_ * RAD2DEG;
+    euler_.yaw_degree_ = euler_.yaw_ * RAD2DEG;
+}

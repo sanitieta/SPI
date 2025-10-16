@@ -21,8 +21,9 @@ private:
     typedef struct Gyro {
         float roll_rate_ = 0, pitch_rate_ = 0, yaw_rate_ = 0;
         float last_roll_rate_ = 0, last_pitch_rate_ = 0, last_yaw_rate_ = 0;
+        float gyro_roll_ = 0, gyro_pitch_ = 0, gyro_yaw_ = 0;
         float gyro_range_ = 0;
-        void gyro_calculate(const EulerAngle& euler);
+        void gyro_calculate(const EulerAngle& euler, float dt);
     } Gyro;
 
     typedef struct Accel {
@@ -40,8 +41,8 @@ private:
     } Compass;
 
     void imu_init();
-    void complement_calculate(float dt, float comp_acc_alpha_ = 0.02, float comp_compass_alpha_ = 0.01);
-    void kalman_calculate(float dt);
+    void complement_calculate(float comp_acc_alpha_ = 0.02, float comp_compass_alpha_ = 0.01);
+    void kalman_calculate();
     Accel accel_;
     Gyro gyro_;
     Compass compass_;
