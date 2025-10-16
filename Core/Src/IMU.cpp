@@ -92,6 +92,14 @@ void IMU::Gyro::gyro_calculate(const EulerAngle& euler, float dt) {
     gyro_pitch_ = euler.pitch_ + (last_pitch_rate_ + pitch_rate_) / 2.0f * dt;
     gyro_roll_ = euler.roll_ + (last_roll_rate_ + roll_rate_) / 2.0f * dt;
     gyro_yaw_ = euler.yaw_ + (last_yaw_rate_ + yaw_rate_) / 2.0f * dt;
+
+    // 4. 限制yaw在[-π, π]之间
+    while (gyro_yaw_ >= PI) {
+        gyro_yaw_ -= 2.0f * PI;
+    }
+    while (gyro_yaw_ < -PI) {
+        gyro_yaw_ += 2.0f * PI;
+    }
 }
 
 void IMU::Gyro::gyro_calibrate(size_t calibration_count, size_t calibration_total) {
