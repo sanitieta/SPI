@@ -15,21 +15,30 @@
 // @param dt: time interval in seconds
 void IMU::update(float dt) {
     static bool if_first = true;
-    static size_t i = 0;
+    static size_t calibration_count = 0;
+    static const size_t CALIBRATION_TOTAL = 2000; // 2000次约10秒
+    static size_t compass_duty = 0;
     // 初始化
     if (if_first) {
         imu_init();
         if_first = false;
     }
+    // 校准陀螺仪零偏 2000次约10秒
+    if (calibration_count < CALIBRATION_TOTAL) {
+        calibration_count++;
+        gyro_.gyro_calibrate(calibration_count, CALIBRATION_TOTAL);
+        return;
+    }
+    // 正常运行
     accel_.acc_calculate();
     gyro_.gyro_calculate(this->euler_, dt);
-    if (i % 5 == 0) {
+    if (compass_duty % 5 == 0) {
         compass_.compass_calculate(this->euler_); // 磁力计频率低一些 200Hz
-        i = 0;
+        compass_duty = 0;
     } else {
         compass_.if_updated_ = false; // 手动清除标志位1
     }
-    i++;
+    compass_duty++;
     kalman_calculate();
 }
 
@@ -40,7 +49,7 @@ void IMU::get_euler_angle(float* roll, float* pitch, float* yaw) {
     *yaw = euler_.yaw_degree_;
 }
 
-// ---------------- 加速度计 ----------------
+// 加速度计
 void IMU::Accel::acc_calculate() {
     bmi088_accel_read_data(&acc_range_, &ax_, &ay_, &az_);
     // 输出弧度
@@ -48,16 +57,19 @@ void IMU::Accel::acc_calculate() {
     acc_roll_ = atan2f(ay_, az_);
 }
 
-// ---------------- 陀螺仪 ----------------
+// 陀螺仪
 void IMU::Gyro::gyro_calculate(const EulerAngle& euler, float dt) {
     // 0. 更新last值
     last_roll_rate_ = roll_rate_;
     last_pitch_rate_ = pitch_rate_;
     last_yaw_rate_ = yaw_rate_;
 
-    // 1. 获取陀螺仪数据（单位：rad/s）
+    // 1. 获取陀螺仪数据（单位：rad/s） 减去零偏
     float imu_wx, imu_wy, imu_wz;
     bmi088_gyro_read_data(&gyro_range_, &imu_wx, &imu_wy, &imu_wz);
+    imu_wx -= roll_rate_bias_;
+    imu_wy -= pitch_rate_bias_;
+    imu_wz -= yaw_rate_bias_;
 
     // 2. 坐标系变换（机体系 → 地面系）
     float roll = euler.roll_;
@@ -72,16 +84,29 @@ void IMU::Gyro::gyro_calculate(const EulerAngle& euler, float dt) {
     R[2][0] = 0.0f;
     R[2][1] = sinf(roll) / cosf(pitch);
     R[2][2] = cosf(roll) / cosf(pitch);
-
     roll_rate_ = R[0][0] * imu_wx + R[0][1] * imu_wy + R[0][2] * imu_wz;
     pitch_rate_ = R[1][0] * imu_wx + R[1][1] * imu_wy + R[1][2] * imu_wz;
     yaw_rate_ = R[2][0] * imu_wx + R[2][1] * imu_wy + R[2][2] * imu_wz;
 
+    // 3. 角度积分（中值）
     gyro_pitch_ = euler.pitch_ + (last_pitch_rate_ + pitch_rate_) / 2.0f * dt;
     gyro_roll_ = euler.roll_ + (last_roll_rate_ + roll_rate_) / 2.0f * dt;
     gyro_yaw_ = euler.yaw_ + (last_yaw_rate_ + yaw_rate_) / 2.0f * dt;
 }
 
+void IMU::Gyro::gyro_calibrate(size_t calibration_count, size_t calibration_total) {
+    float wx, wy, wz;
+    bmi088_gyro_read_data(nullptr, &wx, &wy, &wz); // 读取陀螺仪数据 不用读量程
+    roll_rate_bias_ += wx;
+    pitch_rate_bias_ += wy;
+    yaw_rate_bias_ += wz;
+
+    if (calibration_count == calibration_total) {
+        roll_rate_bias_ /= calibration_total;
+        pitch_rate_bias_ /= calibration_total;
+        yaw_rate_bias_ /= calibration_total;
+    }
+}
 
 // 磁力计
 void IMU::Compass::compass_calculate(const EulerAngle& euler) {
@@ -105,7 +130,7 @@ void IMU::Compass::compass_calculate(const EulerAngle& euler) {
     if_updated_ = true;
 }
 
-// 初始化
+// IMU初始化
 void IMU::imu_init() {
     // 空读几次丢掉前几次不稳定的数据
     for (size_t i = 0; i < 10; i++) {
@@ -115,15 +140,12 @@ void IMU::imu_init() {
         for (volatile int j = 0; j < 5000; j++) {}
     }
 
-    // 初始姿态
+    // 初始姿态 假设初始时静止且水平
     accel_.acc_calculate();
     euler_.pitch_ = accel_.acc_pitch_;
     euler_.roll_ = accel_.acc_roll_;
-
     compass_.compass_calculate(euler_);
     euler_.yaw_ = compass_.compass_yaw_;
-
-    gyro_.gyro_calculate(this->euler_, 0.001f);
 }
 
 // 互补滤波

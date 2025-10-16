@@ -21,9 +21,11 @@ private:
     typedef struct Gyro {
         float roll_rate_ = 0, pitch_rate_ = 0, yaw_rate_ = 0;
         float last_roll_rate_ = 0, last_pitch_rate_ = 0, last_yaw_rate_ = 0;
+        float roll_rate_bias_ = 0, pitch_rate_bias_ = 0, yaw_rate_bias_ = 0;
         float gyro_roll_ = 0, gyro_pitch_ = 0, gyro_yaw_ = 0;
         float gyro_range_ = 0;
         void gyro_calculate(const EulerAngle& euler, float dt);
+        void gyro_calibrate(size_t calibration_count,size_t calibration_total);
     } Gyro;
 
     typedef struct Accel {
